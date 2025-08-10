@@ -26,7 +26,7 @@ public class A2aServiceImpl {
         this.configuration = configuration;
     }
     
-    public AgentCard getAgentCard(Map<String, String> parameters) throws Exception {
+    public void getAgentCard(Map<String, String> parameters) throws Exception {
         logger.debug("Creating A2A client with URL: {}", configuration.getUrl());
         A2AClient client = new A2AClient(configuration.getUrl());
         String cardPath = configuration.getCard().getPath();
@@ -34,11 +34,10 @@ public class A2aServiceImpl {
         logger.info("Fetching agent card from path: {}", cardPath);
         AgentCard agentCard = client.getAgentCard(cardPath, parameters);
         logger.info("Agent card retrieved: {}", agentCard);
-        
-        return agentCard;
+
     }
     
-    public SendMessageResponse sendMessage(String message) throws Exception {
+    public void sendMessage(String message) throws Exception {
         logger.debug("Creating A2A client with URL: {}", configuration.getUrl());
         A2AClient client = new A2AClient(configuration.getUrl());
         MessageSendParams params = buildMessageSendParams(message);
@@ -54,65 +53,49 @@ public class A2aServiceImpl {
             }
             default -> logger.info("Received non-task response: {}", response.getResult());
         }
-        
-        return response;
+
     }
     
-    public boolean sendStreamingMessage(String message) throws Exception {
+    public void sendStreamingMessage(String message) throws Exception {
         CountDownLatch latch = new CountDownLatch(1);
-        
-        return sendStreamingMessage(message, 
-            getDefaultEventHandler(latch),
-            getDefaultErrorHandler(latch),
-            getDefaultFailureHandler(latch),
-            STREAMING_TIMEOUT_SECONDS,
-            STREAMING_TIMEOUT_UNIT);
-    }
-    
-    public boolean sendStreamingMessage(String message,
-                                      Consumer<StreamingEventKind> eventHandler,
-                                      Consumer<JSONRPCError> errorHandler, 
-                                      Runnable failureHandler,
-                                      long timeout, 
-                                      TimeUnit timeUnit) throws Exception {
+
         logger.debug("Creating A2A client with URL: {}", configuration.getUrl());
         A2AClient client = new A2AClient(configuration.getUrl());
         MessageSendParams params = buildMessageSendParams(message);
-        CountDownLatch latch = new CountDownLatch(1);
-        
+        CountDownLatch latch1 = new CountDownLatch(1);
+
         // Wrap handlers to countdown latch on completion
         Consumer<StreamingEventKind> wrappedEventHandler = event -> {
-            eventHandler.accept(event);
+            getDefaultEventHandler(latch).accept(event);
             if (shouldCountDown(event)) {
-                latch.countDown();
+                latch1.countDown();
             }
         };
-        
+
         Consumer<JSONRPCError> wrappedErrorHandler = error -> {
-            errorHandler.accept(error);
-            latch.countDown();
+            getDefaultErrorHandler(latch).accept(error);
+            latch1.countDown();
         };
-        
+
         Runnable wrappedFailureHandler = () -> {
-            failureHandler.run();
-            latch.countDown();
+            getDefaultFailureHandler(latch).run();
+            latch1.countDown();
         };
-        
+
         logger.info("Sending streaming message: {}", message);
         client.sendStreamingMessage(params, wrappedEventHandler, wrappedErrorHandler, wrappedFailureHandler);
-        
+
         logger.info("Listening for streaming events...");
-        boolean completed = latch.await(timeout, timeUnit);
-        
+        boolean completed = latch1.await(STREAMING_TIMEOUT_SECONDS, STREAMING_TIMEOUT_UNIT);
+
         if (!completed) {
-            logger.info("Streaming session timed out after {} {}", timeout, timeUnit.toString().toLowerCase());
+            logger.info("Streaming session timed out after {} {}", (long) STREAMING_TIMEOUT_SECONDS, STREAMING_TIMEOUT_UNIT.toString().toLowerCase());
         } else {
             logger.info("Streaming session completed");
         }
-        
-        return completed;
+
     }
-    
+
     private Consumer<StreamingEventKind> getDefaultEventHandler(CountDownLatch latch) {
         return event -> {
             logger.info("Received event: {}", event.getClass().getSimpleName());
